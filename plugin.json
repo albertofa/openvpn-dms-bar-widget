@@ -1,0 +1,15 @@
+{
+    "id": "openvpn3Vpn",
+    "name": "OpenVPN 3",
+    "description": "Connect, disconnect and monitor openvpn3-linux sessions from the bar and Control Center, including web/SAML/OAuth sign-in profiles that NetworkManager can't handle.",
+    "version": "1.0.0",
+    "author": "José Alberto (albertofa)",
+    "type": "widget",
+    "capabilities": ["dankbar-widget", "control-center", "vpn"],
+    "component": "./OpenVPN3Widget.qml",
+    "icon": "vpn_lock",
+    "settings": "./OpenVPN3Settings.qml",
+    "startupCheck": "./StartupCheck.qml",
+    "dependencies": ["openvpn3"],
+    "permissions": ["settings_read", "settings_write", "process"]
+}
