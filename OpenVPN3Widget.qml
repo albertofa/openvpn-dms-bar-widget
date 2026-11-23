@@ -5,7 +5,10 @@ import qs.Common
 import qs.Services
 import qs.DCommon.Widgets
 import qs.Widgets
+import qs.Modals.Common
 import qs.Modals.FileBrowser
+import qs.Modules.ControlCenter
+import qs.Modules.ControlCenter.Widgets
 import qs.Modules.Plugins
 import "Ovpn3.js" as Ovpn3
 
@@ -178,9 +181,21 @@ PluginComponent {
     }
 
     function openImportDialog() {
-        importBrowserLoader.active = true;
-        if (importBrowserLoader.item)
-            importBrowserLoader.item.open();
+        // The popout is a layer surface holding keyboard focus. If the file
+        // browser window maps while it is still closing, the compositor does
+        // not focus the new window, so wait for the popout to be gone first.
+        importOpenTimer.restart();
+    }
+
+    Timer {
+        id: importOpenTimer
+        interval: 350
+        repeat: false
+        onTriggered: {
+            importBrowserLoader.active = true;
+            if (importBrowserLoader.item)
+                importBrowserLoader.item.open();
+        }
     }
 
     function importProfile(path) {
@@ -329,187 +344,216 @@ PluginComponent {
         }
     }
 
-    // ---- popout ------------------------------------------------------------
+    // ---- delete ------------------------------------------------------------
+    function deleteProfile(row) {
+        if (!row || !row.configPath)
+            return;
+        const removeConfig = () => {
+            Proc.runCommand("openvpn3Vpn.remove." + row.configPath, ["sh", "-c", "openvpn3 config-remove --path \"$1\" --force 2>&1", "sh", row.configPath], (out, code) => {
+                if (code === 0) {
+                    ToastService.showInfo(I18n.trFor("openvpn3Vpn", "VPN profile deleted"), row.name);
+                } else {
+                    const detail = String(out || "").split("\n").filter(l => l.trim() !== "").slice(-3).join("\n");
+                    ToastService.showError(I18n.trFor("openvpn3Vpn", "Could not delete %1").arg(row.name), detail);
+                }
+                root.refresh();
+            }, 10);
+        };
+        if (row.sessionPaths.length === 0) {
+            removeConfig();
+            return;
+        }
+        // Disconnect running sessions first, then remove the profile.
+        let pending = row.sessionPaths.length;
+        for (const path of row.sessionPaths) {
+            Proc.runCommand("openvpn3Vpn.disconnect." + path, ["openvpn3", "session-manage", "--path", path, "--disconnect"], () => {
+                pending -= 1;
+                if (pending <= 0)
+                    removeConfig();
+            }, 10);
+        }
+    }
+
+    function confirmDelete(row) {
+        deleteConfirmLoader.active = true;
+        const confirm = deleteConfirmLoader.item;
+        if (!confirm)
+            return;
+        confirm.showWithOptions({
+            "title": I18n.trFor("openvpn3Vpn", "Delete VPN"),
+            "message": I18n.trFor("openvpn3Vpn", "Delete \"%1\"?").arg(row.name),
+            "confirmText": I18n.trFor("openvpn3Vpn", "Delete"),
+            "danger": true,
+            "onConfirm": () => root.deleteProfile(row)
+        });
+    }
+
+    function disconnectAll() {
+        for (const r of rows) {
+            if (Ovpn3.isActive(r.state))
+                disconnectConfig(r.name);
+        }
+    }
+
+    Loader {
+        id: deleteConfirmLoader
+        active: false
+        sourceComponent: ConfirmModal {}
+    }
+
+    // ---- popout (mirrors the built-in DMS VPN popout) ------------------------
     popoutWidth: 380
-    popoutHeight: Math.min(560, 150 + Math.max(1, rows.length) * 68)
 
     popoutContent: Component {
-        PopoutComponent {
+        Column {
             id: popout
-            headerText: I18n.trFor("openvpn3Vpn", "OpenVPN 3")
+
+            property var closePopout: null
+
+            width: parent ? parent.width : root.popoutWidth
+            spacing: PopoutMetrics.contentGap
+
+            DButton {
+                anchors.right: parent.right
+                visible: root.available
+                buttonHeight: Theme.buttonHeightXS
+                iconName: root.importing ? "sync" : "add"
+                iconSize: Theme.iconSizeSmall
+                text: I18n.trFor("openvpn3Vpn", "Import")
+                variant: "tonal"
+                enabled: !root.importing
+                onClicked: {
+                    if (popout.closePopout)
+                        popout.closePopout();
+                    root.openImportDialog();
+                }
+            }
 
             Column {
                 width: parent.width
-                spacing: Theme.spacingS
+                spacing: CcMetrics.detailContentGap
 
-                StyledText {
+                CcGroup {
                     width: parent.width
-                    visible: !root.available
-                    wrapMode: Text.WordWrap
-                    color: Theme.surfaceVariantText
-                    font.pixelSize: Theme.fontSizeSmall
-                    text: I18n.trFor("openvpn3Vpn", "Install openvpn3-linux (AUR: openvpn3) and import a profile to use this widget.")
+
+                    CcListRow {
+                        iconName: "vpn_key"
+                        iconColor: root.isConnected ? Theme.primary : Theme.surfaceText
+                        title: {
+                            if (!root.available)
+                                return I18n.trFor("openvpn3Vpn", "openvpn3 is not installed");
+                            const names = root.connectedNames;
+                            if (names.length === 0)
+                                return I18n.trFor("openvpn3Vpn", "Active: None");
+                            if (names.length === 1)
+                                return I18n.trFor("openvpn3Vpn", "Active: %1").arg(names[0]);
+                            return I18n.trFor("openvpn3Vpn", "Active: %1 +%2").arg(names[0]).arg(names.length - 1);
+                        }
+
+                        DButton {
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: root.isConnected
+                            buttonHeight: Theme.buttonHeightXS
+                            iconName: "link_off"
+                            iconSize: Theme.iconSizeSmall
+                            text: I18n.trFor("openvpn3Vpn", "Disconnect")
+                            backgroundColor: Theme.errorHover
+                            textColor: Theme.error
+                            enabled: root.busyConfig === ""
+                            onClicked: root.disconnectAll()
+                        }
+                    }
                 }
 
-                StyledText {
+                CcEmptyState {
                     width: parent.width
                     visible: root.available && root.rows.length === 0
-                    wrapMode: Text.WordWrap
-                    color: Theme.surfaceVariantText
-                    font.pixelSize: Theme.fontSizeSmall
-                    text: I18n.trFor("openvpn3Vpn", "No profiles imported yet. Use Import profile below to add an .ovpn file.")
+                    iconName: "vpn_key_off"
+                    title: I18n.trFor("openvpn3Vpn", "No VPN profiles")
+                    subtitle: I18n.trFor("openvpn3Vpn", "Click Import to add a %1 or %2 file").arg(".ovpn").arg(".conf")
                 }
 
-                Repeater {
-                    model: root.rows
-
-                    delegate: Rectangle {
-                        id: rowItem
-
-                        required property var modelData
-                        readonly property bool active: Ovpn3.isActive(modelData.state)
-                        readonly property bool busy: root.busyConfig === modelData.name || modelData.state === "auth" || modelData.state === "connecting"
-
-                        width: parent.width
-                        height: 60
-                        radius: Theme.cornerRadius
-                        color: modelData.state === "connected" ? Theme.withAlpha(Theme.primary, 0.12) : Theme.withAlpha(Theme.chipSurface, 0.6)
-
-                        DIcon {
-                            id: stateIcon
-                            anchors.left: parent.left
-                            anchors.leftMargin: Theme.spacingM
-                            anchors.verticalCenter: parent.verticalCenter
-                            size: Theme.iconSize
-                            name: rowItem.active ? "vpn_lock" : "vpn_key_off"
-                            color: modelData.state === "connected" ? Theme.primary : (modelData.state === "failed" ? Theme.error : Theme.surfaceVariantText)
-                        }
-
-                        Column {
-                            anchors.left: stateIcon.right
-                            anchors.leftMargin: Theme.spacingM
-                            anchors.right: actionButton.left
-                            anchors.rightMargin: Theme.spacingS
-                            anchors.verticalCenter: parent.verticalCenter
-                            spacing: 2
-
-                            StyledText {
-                                width: parent.width
-                                elide: Text.ElideRight
-                                text: modelData.name + (modelData.name === root.defaultConfig ? "  ★" : "")
-                                color: Theme.surfaceText
-                                font.pixelSize: Theme.fontSizeMedium
-                                font.weight: Theme.fontWeightMedium
-                            }
-
-                            StyledText {
-                                width: parent.width
-                                elide: Text.ElideRight
-                                color: Theme.surfaceVariantText
-                                font.pixelSize: Theme.fontSizeSmall
-                                text: {
-                                    switch (modelData.state) {
-                                    case "connected":
-                                        return I18n.trFor("openvpn3Vpn", "Connected") + (modelData.device ? " • " + modelData.device : "");
-                                    case "auth":
-                                        return I18n.trFor("openvpn3Vpn", "Waiting for sign-in in your browser");
-                                    case "connecting":
-                                        return I18n.trFor("openvpn3Vpn", "Connecting…");
-                                    case "paused":
-                                        return I18n.trFor("openvpn3Vpn", "Paused");
-                                    case "failed":
-                                        return modelData.status || I18n.trFor("openvpn3Vpn", "Failed");
-                                    default:
-                                        return root.busyConfig === modelData.name ? I18n.trFor("openvpn3Vpn", "Starting…") : I18n.trFor("openvpn3Vpn", "Disconnected");
-                                    }
-                                }
-                            }
-                        }
-
-                        Rectangle {
-                            id: actionButton
-                            anchors.right: parent.right
-                            anchors.rightMargin: Theme.spacingM
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: actionText.implicitWidth + Theme.spacingM * 2
-                            height: 32
-                            radius: Theme.cornerRadius
-                            opacity: (root.busyConfig === modelData.name && !rowItem.active) ? 0.5 : 1
-                            color: actionArea.containsMouse ? Theme.withAlpha(Theme.primary, 0.25) : Theme.withAlpha(Theme.primary, 0.14)
-
-                            StyledText {
-                                id: actionText
-                                anchors.centerIn: parent
-                                color: Theme.primary
-                                font.pixelSize: Theme.fontSizeSmall
-                                font.weight: Theme.fontWeightMedium
-                                text: {
-                                    if (modelData.state === "connected" || modelData.state === "paused")
-                                        return I18n.trFor("openvpn3Vpn", "Disconnect");
-                                    if (rowItem.active)
-                                        return I18n.trFor("openvpn3Vpn", "Cancel");
-                                    return I18n.trFor("openvpn3Vpn", "Connect");
-                                }
-                            }
-
-                            MouseArea {
-                                id: actionArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: !(root.busyConfig === modelData.name && !rowItem.active)
-                                onClicked: {
-                                    if (rowItem.active)
-                                        root.disconnectConfig(modelData.name);
-                                    else if (modelData.imported)
-                                        root.connectConfig(modelData.name);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    id: importButton
-                    visible: root.available
+                Column {
+                    id: profileList
                     width: parent.width
-                    height: 40
-                    radius: Theme.cornerRadius
-                    opacity: root.importing ? 0.5 : 1
-                    color: importArea.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : Theme.withAlpha(Theme.primary, 0)
-                    border.width: 1
-                    border.color: Theme.withAlpha(Theme.primary, 0.4)
+                    visible: root.rows.length > 0
+                    spacing: Theme.groupedListGap
 
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: Theme.spacingS
+                    Repeater {
+                        id: profileRepeater
+                        model: root.rows
 
-                        DIcon {
-                            name: "add"
-                            size: Theme.iconSize - 4
-                            color: Theme.primary
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                        delegate: CcListRow {
+                            id: profileRow
 
-                        StyledText {
-                            text: root.importing ? I18n.trFor("openvpn3Vpn", "Importing…") : I18n.trFor("openvpn3Vpn", "Import profile")
-                            color: Theme.primary
-                            font.pixelSize: Theme.fontSizeSmall
-                            font.weight: Theme.fontWeightMedium
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
+                            required property var modelData
+                            required property int index
 
-                    MouseArea {
-                        id: importArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        enabled: !root.importing
-                        onClicked: {
-                            if (popout.closePopout)
-                                popout.closePopout();
-                            root.openImportDialog();
+                            readonly property bool isActiveState: modelData.state === "connected"
+                            readonly property bool isConnecting: root.busyConfig === modelData.name || modelData.state === "auth" || modelData.state === "connecting"
+                            readonly property bool hasError: !isConnecting && modelData.state === "failed"
+
+                            width: profileList.width
+                            topRadius: index === 0 ? Theme.groupedListOuterRadius : Theme.groupedListInnerRadius
+                            bottomRadius: index === profileRepeater.count - 1 ? Theme.groupedListOuterRadius : Theme.groupedListInnerRadius
+
+                            iconName: isConnecting ? "" : (isActiveState ? "vpn_lock" : (hasError ? "error" : "vpn_key_off"))
+                            iconColor: hasError ? Theme.error : contentColor
+                            active: isActiveState
+                            title: modelData.name
+                            subtitle: {
+                                if (modelData.state === "auth")
+                                    return I18n.trFor("openvpn3Vpn", "Waiting for sign-in in your browser");
+                                if (isConnecting)
+                                    return I18n.trFor("openvpn3Vpn", "Connecting...");
+                                if (hasError)
+                                    return modelData.status || I18n.trFor("openvpn3Vpn", "VPN connection failed");
+                                if (isActiveState)
+                                    return "openvpn3" + (modelData.device ? " • " + modelData.device : "");
+                                return modelData.name === root.defaultConfig ? I18n.trFor("openvpn3Vpn", "openvpn3 • default") : "openvpn3";
+                            }
+                            subtitleColor: isConnecting ? Theme.warning : (hasError ? Theme.error : Theme.surfaceVariantText)
+                            clickable: modelData.imported || Ovpn3.isActive(modelData.state)
+                            onClicked: {
+                                if (Ovpn3.isActive(modelData.state))
+                                    root.disconnectConfig(modelData.name);
+                                else if (root.busyConfig === "")
+                                    root.connectConfig(modelData.name);
+                            }
+
+                            leading: DSpinner {
+                                size: Theme.iconSizeMedium
+                                strokeWidth: CcMetrics.spinnerStroke
+                                color: Theme.warning
+                                visible: profileRow.isConnecting
+                                running: visible
+                            }
+
+                            DActionButton {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: Ovpn3.isActive(profileRow.modelData.state)
+                                buttonSize: Theme.buttonHeightXS
+                                iconSize: Theme.iconSizeMedium
+                                iconName: "link_off"
+                                Accessible.name: I18n.trFor("openvpn3Vpn", "Disconnect")
+                                iconColor: profileRow.contentColor
+                                onClicked: root.disconnectConfig(profileRow.modelData.name)
+                            }
+
+                            DActionButton {
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: profileRow.modelData.imported
+                                buttonSize: Theme.buttonHeightXS
+                                iconSize: Theme.iconSizeMedium
+                                iconName: "delete"
+                                iconColor: Theme.error
+                                Accessible.name: I18n.trFor("openvpn3Vpn", "Delete")
+                                onClicked: {
+                                    if (popout.closePopout)
+                                        popout.closePopout();
+                                    root.confirmDelete(profileRow.modelData);
+                                }
+                            }
                         }
                     }
                 }

@@ -2,14 +2,14 @@
 
 A DMS bar and Control Center plugin for [openvpn3-linux](https://codeberg.org/OpenVPN/openvpn3-linux).
 
-Tested on Dux Modular Shell (`dux-shell`) v2.1.2. It uses the DMS plugin API (`PluginComponent`, `startupCheck`, `qs.DCommon.Widgets`), so older or other DMS builds may need small changes.
+Tested on Dux Modular Shell (`dux-shell`) v2.1.2. Besides the plugin API (`PluginComponent`, `startupCheck`), the popout reuses the shell's own Control Center components (`CcGroup`, `CcListRow`, `DButton`, `ConfirmModal`) so it looks the same as the built-in VPN popout. Those are internal, so other DMS versions may need small changes.
 
 The built-in DMS VPN widget only manages NetworkManager connections. Profiles that sign in through the browser (OpenVPN web auth / SAML / OAuth, e.g. Google or Entra ID SSO) don't work with `networkmanager-openvpn`. They fail with `AUTH_FAILED` because the plugin never advertises `IV_SSO`. openvpn3-linux supports them, and this widget puts it in your bar.
 
 ## Features
 
 - Bar icon showing the connection state (connected / connecting or waiting for sign-in / disconnected), for horizontal and vertical bars
-- Popout listing every imported openvpn3 profile with Connect / Disconnect / Cancel
+- Popout with the same layout as the built-in DMS VPN popout: an "Active:" status card with Disconnect, and the profile list. Click a profile to connect or disconnect it, and use the delete button (with confirmation) to remove it
 - **Import profile** button: pick an `.ovpn` / `.conf` file and it is imported as a persistent profile named after the file. Duplicate names are refused
 - Right-click the icon to toggle your default profile
 - Control Center tile that toggles the default profile

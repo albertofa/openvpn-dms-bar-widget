@@ -124,6 +124,7 @@ function buildRows(configs, sessions) {
         var best = bestSession(list);
         rows.push({
             name: c.name,
+            configPath: c.path,
             imported: true,
             state: best ? best.state : "none",
             status: best ? best.status : "",
@@ -141,6 +142,7 @@ function buildRows(configs, sessions) {
         var b = bestSession(l);
         rows.push({
             name: name || "(unnamed session)",
+            configPath: "",
             imported: false,
             state: b.state,
             status: b.status,

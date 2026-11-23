@@ -85,6 +85,7 @@ test("buildRows merges sessions and prefers connected", () => {
     const work = rows.find(r => r.name === "work-vpn");
     assert.equal(work.state, "connected");
     assert.equal(work.sessionPaths.length, 2);
+    assert.equal(work.configPath, "/net/openvpn/v3/configuration/90de6549x7058x4bbbxb00dx492e6c91ed58");
     assert.equal(rows.find(r => r.name === "home").state, "none");
     assert.equal(Ovpn3.overallState(rows), "connected");
 });
