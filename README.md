@@ -10,6 +10,7 @@ The built-in DMS VPN widget only manages NetworkManager connections. Profiles th
 
 - Bar icon showing the connection state (connected / connecting or waiting for sign-in / disconnected), for horizontal and vertical bars
 - Popout listing every imported openvpn3 profile with Connect / Disconnect / Cancel
+- **Import profile** button: pick an `.ovpn` / `.conf` file and it is imported as a persistent profile named after the file. Duplicate names are refused
 - Right-click the icon to toggle your default profile
 - Control Center tile that toggles the default profile
 - Web-auth profiles: openvpn3 opens the sign-in page in your browser. If it can't, the widget opens the URL itself
@@ -32,6 +33,8 @@ The built-in DMS VPN widget only manages NetworkManager connections. Profiles th
 - **Fedora / Debian / Ubuntu**: see the [OpenVPN 3 Linux](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux) repositories.
 
 ### Importing a profile
+
+Use the **Import profile** button in the popout, or the CLI:
 
 ```sh
 openvpn3 config-import --config ~/Downloads/my-vpn.ovpn --name my-vpn --persistent
@@ -73,6 +76,7 @@ The widget only calls the `openvpn3` CLI. It needs no root and no extra services
 - `openvpn3 configs-list --json` and `openvpn3 sessions-list` for status
 - `openvpn3 session-start --config NAME` to connect (in the foreground, so openvpn3 runs the web-auth flow)
 - `openvpn3 session-manage --path PATH --disconnect` to disconnect
+- `openvpn3 config-import --config FILE --name NAME --persistent` to import
 
 Profiles that ask for a username/password or a challenge response can't be answered from the widget yet. Start those once from a terminal.
 

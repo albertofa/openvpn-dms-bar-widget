@@ -1,9 +1,11 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import qs.Common
 import qs.Services
 import qs.DCommon.Widgets
 import qs.Widgets
+import qs.Modals.FileBrowser
 import qs.Modules.Plugins
 import "Ovpn3.js" as Ovpn3
 
@@ -166,6 +168,57 @@ PluginComponent {
         }
     }
 
+    // ---- import ------------------------------------------------------------
+    property bool importing: false
+
+    function profileNameFromPath(path) {
+        const base = String(path).split("/").pop().replace(/\.(ovpn|conf)$/i, "");
+        const name = base.trim().replace(/\s+/g, "-").replace(/[^A-Za-z0-9._-]/g, "");
+        return name || "vpn";
+    }
+
+    function openImportDialog() {
+        importBrowserLoader.active = true;
+        if (importBrowserLoader.item)
+            importBrowserLoader.item.open();
+    }
+
+    function importProfile(path) {
+        if (!path || importing)
+            return;
+        const localPath = String(path).replace(/^file:\/\//, "");
+        const name = profileNameFromPath(localPath);
+        // Importing the same name twice makes `session-start --config NAME`
+        // ambiguous, so refuse instead of creating a duplicate.
+        if (configs.some(c => c.name === name)) {
+            ToastService.showError(I18n.trFor("openvpn3Vpn", "Profile already exists"), I18n.trFor("openvpn3Vpn", "A profile named \"%1\" is already imported. Remove it first or rename the file.").arg(name));
+            return;
+        }
+        importing = true;
+        Proc.runCommand("openvpn3Vpn.import." + instanceKey, ["sh", "-c", "openvpn3 config-import --config \"$1\" --name \"$2\" --persistent 2>&1", "sh", localPath, name], (out, code) => {
+            root.importing = false;
+            if (code === 0) {
+                ToastService.showInfo(I18n.trFor("openvpn3Vpn", "VPN profile imported"), name);
+            } else {
+                const detail = String(out || "").split("\n").filter(l => l.trim() !== "").slice(-3).join("\n");
+                ToastService.showError(I18n.trFor("openvpn3Vpn", "Could not import %1").arg(name), detail || I18n.trFor("openvpn3Vpn", "openvpn3 exited with code %1").arg(code));
+            }
+            root.refresh();
+        }, 10);
+    }
+
+    LazyLoader {
+        id: importBrowserLoader
+        active: false
+
+        FileBrowserModal {
+            browserTitle: I18n.trFor("openvpn3Vpn", "Import OpenVPN profile")
+            bucket: "vpn"
+            filters: ["*.ovpn", "*.conf", "*"]
+            onAccepted: paths => root.importProfile(paths[0])
+        }
+    }
+
     function handleConnectLine(line) {
         connectProc.lines.push(line);
         // openvpn3 opens the sign-in page itself through the desktop portal /
@@ -284,7 +337,6 @@ PluginComponent {
         PopoutComponent {
             id: popout
             headerText: I18n.trFor("openvpn3Vpn", "OpenVPN 3")
-            detailsText: root.statusSummary
 
             Column {
                 width: parent.width
@@ -305,7 +357,7 @@ PluginComponent {
                     wrapMode: Text.WordWrap
                     color: Theme.surfaceVariantText
                     font.pixelSize: Theme.fontSizeSmall
-                    text: I18n.trFor("openvpn3Vpn", "No profiles imported. Run:\nopenvpn3 config-import --config FILE.ovpn --name NAME --persistent")
+                    text: I18n.trFor("openvpn3Vpn", "No profiles imported yet. Use Import profile below to add an .ovpn file.")
                 }
 
                 Repeater {
@@ -417,13 +469,49 @@ PluginComponent {
                     }
                 }
 
-                StyledText {
+                Rectangle {
+                    id: importButton
+                    visible: root.available
                     width: parent.width
-                    visible: root.available && root.rows.length > 0
-                    wrapMode: Text.WordWrap
-                    color: Theme.surfaceVariantText
-                    font.pixelSize: Theme.fontSizeSmall
-                    text: I18n.trFor("openvpn3Vpn", "Right-click the bar icon to toggle the default profile (★).")
+                    height: 40
+                    radius: Theme.cornerRadius
+                    opacity: root.importing ? 0.5 : 1
+                    color: importArea.containsMouse ? Theme.withAlpha(Theme.primary, 0.12) : Theme.withAlpha(Theme.primary, 0)
+                    border.width: 1
+                    border.color: Theme.withAlpha(Theme.primary, 0.4)
+
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: Theme.spacingS
+
+                        DIcon {
+                            name: "add"
+                            size: Theme.iconSize - 4
+                            color: Theme.primary
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        StyledText {
+                            text: root.importing ? I18n.trFor("openvpn3Vpn", "Importing…") : I18n.trFor("openvpn3Vpn", "Import profile")
+                            color: Theme.primary
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Theme.fontWeightMedium
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+
+                    MouseArea {
+                        id: importArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        enabled: !root.importing
+                        onClicked: {
+                            if (popout.closePopout)
+                                popout.closePopout();
+                            root.openImportDialog();
+                        }
+                    }
                 }
             }
         }
